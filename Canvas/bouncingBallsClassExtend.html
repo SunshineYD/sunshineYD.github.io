@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>弹球--ES6 Class语法糖继承</title>
+  <style>
+    html, body, canvas {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      font-family: "PingFangSC-Regular", "微软雅黑", sans-serif;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <canvas></canvas>
+  <script>
+    // 球的一些常量参数
+    const MAX_SIZE = 20;
+    const MIN_SIZE = 10;
+    const MAX_VEL = 7;
+    const MIN_VEL = -7;
+    const BALL_COUNT = 25;
+    
+    // 初始化画布
+    const canvas = document.querySelector('canvas');
+    const ctx = canvas.getContext('2d');
+    // 页面大小调整时，重新设置画布大小
+    const resizeCanvas = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // 生成随机参数，工具函数
+    const random = (min, max) => Math.floor(Math.random() * (max - min)) + min;
+    const randomColor = () => `rgb(${[0,0,0].map(() => random(0,255)).join()}`;
+
+    // 球的构造函数
+    class Ball {
+      constructor({ x, y, velX, velY, color, size }) {
+        this.x = x;
+        this.y = y;
+        this.velX = velX;
+        this.velY = velY;
+        this.color = color;
+        this.size = size;
+      }
+
+      // 画球
+      draw() {
+        ctx.beginPath();
+        ctx.fillStyle = this.color;
+        ctx.arc(this.x, this.y, this.size, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+
+      // 更新球的位置
+      update() {
+        const { width, height } = canvas;
+        // 监测水平边界
+        if (this.x + this.size >= width || this.x - this.size <= 0) {
+          this.velX *= -1;
+        }
+        // 监测垂直边界
+        if (this.y + this.size >= height || this.y - this.size <= 0) {
+          this.velY *= -1;
+        }
+        // 更新位置信息
+        this.x += this.velX;
+        this.y += this.velY;
+      }
+
+      // 碰撞检测
+      collisionDetect(balls) {
+        balls.forEach(ball => {
+          if (this === ball) return
+          if (this !== ball) {
+            const dx = this.x - ball.x;
+            const dy = this.y - ball.y;
+            const distance = Math.hypot(dx, dy);
+            // 等价于：Math.sqrt(dx * dx + dy * dy)
+            // 碰撞条件：两球中心距离小于半径之和时触发颜色变化。
+            if (distance < this.size + ball.size) {
+              ball.color = this.color = randomColor();
+            }
+          }
+        });
+      }
+    }
+
+    // 创建弹球实例
+    const createBalls = (count = BALL_COUNT) => {
+      // const balls = [];
+      // for (let i = 0; i < count; i++) {
+      //   balls.push(new Ball({
+      //     x: random(0, canvas.width),
+      //     y: random(0, canvas.height),
+      //     velX: random(MIN_VEL, MAX_VEL),
+      //     velY: random(MIN_VEL, MAX_VEL),
+      //     color: randomColor(),
+      //     size: random(MIN_SIZE, MAX_SIZE)
+      //   }));
+      // }
+      // return balls;
+      return Array.from({length: count}, () => {
+        const size = random(MIN_SIZE, MAX_SIZE);
+        return new Ball({
+          x: random(size, canvas.width - size),
+          y: random(size, canvas.height - size),
+          velX: random(MIN_VEL, MAX_VEL),
+          velY: random(MIN_VEL, MAX_VEL),
+          color: randomColor(),
+          size
+        });
+      });
+    };
+
+    const balls = createBalls();
+    const loop = () => {
+      // 清空画布（半透明黑色实现拖影效果）
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // 更新所有弹球，顺序：依次执行绘制、位置更新、碰撞检测。
+      balls.forEach(ball => {
+        ball.draw();
+        ball.update();
+        ball.collisionDetect(balls);
+      });
+       // 递归调用下一帧
+      requestAnimationFrame(loop);
+    };
+    loop();
+
+  </script>
+</body>
+</html>
