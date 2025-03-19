@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>优化版弹球游戏</title>
+  <style>
+    body {
+        margin: 0;
+        overflow: hidden;
+        font-family: "PingFangSC-Regular", "微软雅黑", sans-serif;
+        height: 100%;
+      }
+
+      h1 {
+        font-size: 2rem;
+        position: absolute;
+        margin: 0;
+        top: -4px;
+        right: 5px;
+        color: #fff;
+        letter-spacing: 0.2em;
+        text-shadow: 7px 2px 4px rgba(255, 255, 255, 0.55);
+      }
+
+      p {
+        position: absolute;
+        margin: 0;
+        top: 35px;
+        right: 5px;
+        color: #aaa;
+      }
+  </style>
+</head>
+<body>
+  <h1>弹球吞噬者</h1>
+  <p id="score"></p>
+  <canvas></canvas>
+
+  <script type="module">
+    /**
+     * 说明：增加弹球吞噬效果
+     * 1、对比bouncingBallsPro.html，优化吞噬球移动效果
+     * 2、增加缩放resize相应处理
+     * 3、模块化开发，集中功能管理，逻辑清晰分层
+     * 4、增加碰撞效果
+    */
+    // ================ 配置常量 ================
+    const CONFIG = { // 集中管理游戏参数
+      BALL: { // 普通球配置
+        COUNT: 25,    // 初始小球数量
+        SIZE_MIN: 8,  // 最小半径
+        SIZE_MAX: 18, // 最大半径
+        SPEED_MAX: 6  // 最大移动速度
+      },
+      EVIL_CIRCLE: {  // 玩家控制吞噬球
+        SIZE: 14,     // 固定半径
+        COLOR: '#FFFFFF',
+        SPEED: 7      // 移动速度
+      },
+      PARTICLE: {   // 粒子特效
+        COUNT: 8,   // 每次爆炸产生的粒子数
+        LIFE: 1.2   // 粒子存活时间（秒）
+      }
+    };
+
+    // ================ 工具函数 ================
+    const Utils = {
+      // 生成[min,max)区间随机数
+      random: (min, max) => min + Math.random() * (max - min),
+      // 生成随机整数（用于尺寸等需要整数的属性）
+      randomInt: (min, max) => Math.floor(Utils.random(min, max)),
+      // 生成RGB随机颜色 -- 生成三元色
+      randomColor: () => `rgb(${[0, 0, 0].map(() => Utils.random(0, 255)).join()})`,
+      // 防抖函数（用于窗口resize事件）
+      debounce: (fn, delay) => {
+        let timer;
+        return (...args) => {
+          clearTimeout(timer);
+          timer = setTimeout(() => fn(...args), delay);
+        };
+      }
+    };
+
+    // ================ 游戏模块 ================
+    class CanvasManager {
+      constructor(canvas) {
+        this.canvas = canvas; // 获取canvas元素
+        this.ctx = canvas.getContext('2d'); // 获取2D绘图上下文
+        this.resize(); // 初始尺寸设置
+        // 防抖处理resize事件（200ms间隔）
+        window.addEventListener('resize', Utils.debounce(() => this.resize(), 200));
+      }
+
+      resize() {
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+      }
+
+      clear() {
+        // 使用半透明黑色清屏，形成拖影效果 -- 使用fillRect而非clearRect实现运动残影
+        this.ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+        this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      }
+    }
+
+    class CollisionSystem {
+      constructor(gridSize = 100) { // 默认网格100x100像素
+        this.grid = new Map();      // 使用Map存储空间网格
+        this.gridSize = gridSize;   // 网格尺寸
+      }
+
+      clear() {
+        this.grid.clear();
+      }
+
+      insert(object) {
+        const gridX = Math.floor(object.x / this.gridSize); // 计算网格坐标
+        const gridY = Math.floor(object.y / this.gridSize);
+        const key = `${gridX},${gridY}`;  // 生成唯一网格键
+        
+        if (!this.grid.has(key)) this.grid.set(key, []); // 初始化网格
+        this.grid.get(key).push(object);  // 存入当前网格
+      }
+
+      /** 
+       * 优化原理：
+       * 1、将屏幕划分为网格，碰撞检测时只需检查相邻网格中的对象
+       * 2、复杂度从O(n²)降低到O(n)，50个球时检测次数从2500次降到约100次
+      */
+
+      getNeighbors(object) {
+        // 检查3x3区域（当前网格及其周围8个）
+        const gridX = Math.floor(object.x / this.gridSize);
+        const gridY = Math.floor(object.y / this.gridSize);
+        const neighbors = [];
+        
+        for (let x = -1; x <= 1; x++) {
+          for (let y = -1; y <= 1; y++) {
+            const key = `${gridX + x},${gridY + y}`;
+            if (this.grid.has(key)) neighbors.push(...this.grid.get(key));
+          }
+        }
+        return neighbors.filter(obj => obj !== object); // 排除自身
+      }
+    }
+
+    /**
+     * 设计亮点：
+     * 1、使用Set存储按键状态，自动去重
+     * 2、isPressed支持多键位映射（如同时接受W和↑键）
+    */
+    class InputHandler {
+      constructor() {
+        this.keys = new Set();  // 存储当前按下的键
+        // 事件监听（使用箭头函数保持this指向）
+        window.addEventListener('keydown', e => this.keys.add(e.key));
+        window.addEventListener('keyup', e => this.keys.delete(e.key));
+      }
+
+      isPressed(keys) {
+        return keys.some(k => this.keys.has(k));  // 支持多个按键别名
+      }
+    }
+
+    class Particle {
+      constructor(x, y, color) {
+        this.x = x;
+        this.y = y;
+        this.color = color;
+        this.velocity = { // 随机方向速度 -- 随机速度产生扩散效果
+          x: (Math.random() - 0.5) * 5,
+          y: (Math.random() - 0.5) * 5
+        };
+        this.life = CONFIG.PARTICLE.LIFE; // 初始生命周期 -- 生命周期控制透明度和存活时间
+      }
+
+      update() {
+        this.x += this.velocity.x; // 根据速度移动
+        this.y += this.velocity.y;
+        this.life -= 0.02; // 生命周期递减
+      }
+
+      draw(ctx) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, this.life); // 渐隐效果
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, 2, 0, Math.PI * 2); // 绘制小圆点
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    class ParticleSystem {
+      constructor() {
+        this.particles = [];
+      }
+
+      emit(x, y, color) {
+        for (let i = 0; i < CONFIG.PARTICLE.COUNT; i++) {
+          this.particles.push(new Particle(x, y, color));
+        }
+      }
+
+      update() {
+        this.particles = this.particles.filter(p => p.life > 0);
+        this.particles.forEach(p => p.update());
+      }
+
+      draw(ctx) {
+        this.particles.forEach(p => p.draw(ctx));
+      }
+    }
+
+    // ================ 游戏对象 ================
+    class Ball {
+      constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.size = Utils.randomInt(CONFIG.BALL.SIZE_MIN, CONFIG.BALL.SIZE_MAX);
+        this.velX = Utils.random(-CONFIG.BALL.SPEED_MAX, CONFIG.BALL.SPEED_MAX);
+        this.velY = Utils.random(-CONFIG.BALL.SPEED_MAX, CONFIG.BALL.SPEED_MAX);
+        this.color = Utils.randomColor();
+        this.exists = true;
+      }
+
+      update(canvas) {
+        // 边界反弹
+        if (this.x + this.size >= canvas.width || this.x - this.size <= 0) {
+          this.velX *= -1;
+        }
+        if (this.y + this.size >= canvas.height || this.y - this.size <= 0) {
+          this.velY *= -1;
+        }
+
+        this.x += this.velX;
+        this.y += this.velY;
+      }
+
+      draw(ctx) {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        ctx.fill();
+      }
+    }
+
+    class EvilCircle {
+      constructor(canvas) {
+        this.canvas = canvas
+        this.size = CONFIG.EVIL_CIRCLE.SIZE;
+        this.color = CONFIG.EVIL_CIRCLE.COLOR;
+        this.x = Utils.random(this.size, canvas.width - this.size);
+        this.y = Utils.random(this.size, canvas.height - this.size);
+      }
+
+      update(input) {
+        // 根据输入移动（WASD/方向键）-- 速度反向实现反弹效果
+        const speed = CONFIG.EVIL_CIRCLE.SPEED;
+        if (input.isPressed(['a', 'A', 'ArrowLeft'])) this.x -= speed;
+        if (input.isPressed(['d', 'D', 'ArrowRight'])) this.x += speed;
+        if (input.isPressed(['w', 'W', 'ArrowUp'])) this.y -= speed;
+        if (input.isPressed(['s', 'S', 'ArrowDown'])) this.y += speed;
+
+        // 边界限制 -- Math.max/min实现位置约束
+        this.x = Math.max(this.size, Math.min(this.canvas.width - this.size, this.x));
+        this.y = Math.max(this.size, Math.min(this.canvas.height - this.size, this.y));
+      }
+
+      draw(ctx) {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.strokeStyle = this.color;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+    }
+
+    // ================ 游戏主逻辑 ================
+    class Game {
+      constructor() {
+        // 初始化各系统
+        this.canvas = document.querySelector('canvas');
+        this.canvasManager = new CanvasManager(this.canvas);
+        this.ctx = this.canvasManager.ctx;
+        this.input = new InputHandler();
+        this.collisionSystem = new CollisionSystem();
+        console.log(this.collisionSystem, 'coll')
+        this.particleSystem = new ParticleSystem();
+        this.scoreElement = document.getElementById('score');
+        
+        this.init();
+      }
+
+      init() {
+        this.evilCircle = new EvilCircle(this.canvas);
+        this.balls = Array.from({ length: CONFIG.BALL.COUNT }, () => {
+          const size = Utils.randomInt(CONFIG.BALL.SIZE_MIN, CONFIG.BALL.SIZE_MAX);
+          return new Ball(
+            Utils.random(size, this.canvas.width - size),
+            Utils.random(size, this.canvas.height - size)
+          );
+        });
+        this.loop();
+      }
+
+      checkCollisions() {
+        // 使用碰撞系统优化检测
+        this.collisionSystem.clear();
+        this.balls.forEach(ball => this.collisionSystem.insert(ball));
+
+        this.balls.forEach(ball => {
+          if (!ball.exists) return;
+          
+          // 检测与恶魔球的碰撞
+          const dx = ball.x - this.evilCircle.x;
+          const dy = ball.y - this.evilCircle.y;
+          const distance = Math.hypot(dx, dy);
+          if (distance < ball.size + this.evilCircle.size) {
+            ball.exists = false;
+            this.particleSystem.emit(ball.x, ball.y, ball.color);
+          }
+
+          // 球体之间的碰撞
+          this.collisionSystem.getNeighbors(ball).forEach(other => {
+            const dx = ball.x - other.x;
+            const dy = ball.y - other.y;
+            const distance = Math.hypot(dx, dy); // 计算欧氏距离
+            // 等价于 Math.sqrt(dx * dx + dy * dy)
+            // Math.hypot替代Math.sqrt优化性能
+            if (distance < ball.size + other.size) {
+              // 颜色交换实现简单碰撞反馈
+              [ball.color, other.color] = [other.color, ball.color];
+            }
+          });
+        });
+      }
+
+      updateScore() {
+        const aliveCount = this.balls.filter(b => b.exists).length;
+        this.scoreElement.textContent = `剩余弹球: ${aliveCount} 吞噬数量: ${CONFIG.BALL.COUNT - aliveCount}`;
+      }
+
+      loop() {
+        // 游戏循环（约60帧/秒）
+        this.canvasManager.clear();
+        
+        // 更新游戏对象
+        this.evilCircle.update(this.input);
+        this.balls.forEach(ball => ball.exists && ball.update(this.canvas));
+        this.particleSystem.update();
+        
+        // 碰撞检测
+        this.checkCollisions();
+        this.updateScore();
+
+        // 绘制所有对象
+        this.balls.forEach(ball => ball.exists && ball.draw(this.ctx));
+        this.evilCircle.draw(this.ctx);
+        this.particleSystem.draw(this.ctx);
+
+        requestAnimationFrame(() => this.loop()); // 循环调用 -- requestAnimationFrame实现流畅动画
+      }
+    }
+
+    // 启动游戏
+    new Game();
+  </script>
+</body>
+</html>
