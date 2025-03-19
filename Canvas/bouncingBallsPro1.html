@@ -29,12 +29,39 @@
         right: 5px;
         color: #aaa;
       }
+      /* 新增控制面板样式 */
+      .control-panel {
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        background: rgba(0,0,0,0.7);
+        padding: 10px;
+        border-radius: 5px;
+        color: white;
+      }
+      
+      .control-btn {
+        margin: 5px;
+        padding: 8px 15px;
+        background: #4CAF50;
+        border: none;
+        border-radius: 3px;
+        color: white;
+        cursor: pointer;
+      }
   </style>
 </head>
 <body>
   <h1>弹球吞噬者</h1>
   <p id="score"></p>
   <canvas></canvas>
+
+  <!-- 新增控制面板 -->
+  <div class="control-panel">
+    <button class="control-btn" id="startBtn">开始游戏</button>
+    <button class="control-btn" id="resetBtn">重置游戏</button>
+    <button class="control-btn" id="pauseBtn">暂停/继续</button>
+  </div>
 
   <script type="module">
     /**
@@ -80,6 +107,28 @@
         };
       }
     };
+
+    // ================ 新增音频管理 ================
+    class AudioManager {
+      constructor() {
+        this.sounds = {
+          eat: new Audio('data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU'), // 吞噬音效
+          bgm: new Audio('data:audio/mpeg;base64,SUQzBAAAAAAA...') // 背景音乐
+        };
+        
+        // 背景音乐循环
+        this.sounds.bgm.loop = true;
+        this.sounds.bgm.volume = 0.3;
+      }
+
+      play(name) {
+        const sound = this.sounds[name];
+        if (sound) {
+          const clone = sound.cloneNode(true);
+          clone.play();
+        }
+      }
+    }
 
     // ================ 游戏模块 ================
     class CanvasManager {
@@ -279,6 +328,21 @@
     // ================ 游戏主逻辑 ================
     class Game {
       constructor() {
+        // 新增游戏状态
+        this.gameState = {
+          isRunning: false,
+          isPaused: false,
+          score: 0
+        };
+
+        // 初始化音频
+        this.audio = new AudioManager();
+        
+        // 绑定控制按钮
+        document.getElementById('startBtn').addEventListener('click', () => this.start());
+        document.getElementById('resetBtn').addEventListener('click', () => this.reset());
+        document.getElementById('pauseBtn').addEventListener('click', () => this.togglePause());
+
         // 初始化各系统
         this.canvas = document.querySelector('canvas');
         this.canvasManager = new CanvasManager(this.canvas);
@@ -304,6 +368,36 @@
         this.loop();
       }
 
+      // 新增游戏控制方法
+      start() {
+        if (!this.gameState.isRunning) {
+          this.gameState.isRunning = true;
+          this.audio.play('bgm');
+          this.loop();
+        }
+      }
+
+      reset() {
+        // 重置所有状态
+        this.gameState = {
+          isRunning: false,
+          isPaused: false,
+          score: 0
+        };
+        
+        // 重新初始化游戏对象
+        this.canvasManager.clear();
+        this.init();
+        this.updateScore();
+      }
+
+      togglePause() {
+        this.gameState.isPaused = !this.gameState.isPaused;
+        if (!this.gameState.isPaused) {
+          this.loop();
+        }
+      }
+
       checkCollisions() {
         // 使用碰撞系统优化检测
         this.collisionSystem.clear();
@@ -318,6 +412,8 @@
           const distance = Math.hypot(dx, dy);
           if (distance < ball.size + this.evilCircle.size) {
             ball.exists = false;
+            this.gameState.score++;
+            this.audio.play('eat'); // 播放吞噬音效
             this.particleSystem.emit(ball.x, ball.y, ball.color);
           }
 
@@ -338,10 +434,11 @@
 
       updateScore() {
         const aliveCount = this.balls.filter(b => b.exists).length;
-        this.scoreElement.textContent = `剩余弹球: ${aliveCount} 吞噬数量: ${CONFIG.BALL.COUNT - aliveCount}`;
+        this.scoreElement.textContent = `剩余弹球: ${aliveCount} 吞噬数量: ${CONFIG.BALL.COUNT - aliveCount} 剩余：${aliveCount}`;
       }
 
       loop() {
+        if (!this.gameState.isRunning || this.gameState.isPaused) return;
         // 游戏循环（约60帧/秒）
         this.canvasManager.clear();
         
@@ -359,12 +456,22 @@
         this.evilCircle.draw(this.ctx);
         this.particleSystem.draw(this.ctx);
 
-        requestAnimationFrame(() => this.loop()); // 循环调用 -- requestAnimationFrame实现流畅动画
+        if (this.gameState.isRunning) {
+          requestAnimationFrame(() => this.loop());
+        }
+        // requestAnimationFrame(() => this.loop()); // 循环调用 -- requestAnimationFrame实现流畅动画
       }
     }
 
-    // 启动游戏
-    new Game();
+    // ================ 初始化游戏 ================
+    const game = new Game();
+    // game.start()
+    // 添加键盘控制（空格暂停）
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        game.togglePause();
+      }
+    });
   </script>
 </body>
 </html>
