@@ -1,0 +1,152 @@
+<!--
+ * @Author: 杨栋 yangdong@skyworth.com
+ * @Date: 2025-03-27 16:44:15
+ * @LastEditors: 杨栋 yangdong@skyworth.com
+ * @LastEditTime: 2025-03-27 16:44:51
+ * @FilePath: \edu-homework-machine\preloadImage.html
+ * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>高性能图片画廊</title>
+    <style>
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            padding: 20px;
+        }
+
+        .image-item {
+            position: relative;
+            aspect-ratio: 16/9;
+            background: #f5f5f5;
+            border-radius: 8px;
+            overflow: hidden;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .image-item.loaded {
+            opacity: 1;
+        }
+
+        .image-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .loading-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: rgba(0,0,0,0.1);
+        }
+
+        .progress {
+            height: 100%;
+            background: #2196f3;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="loading-bar"><div class="progress"></div></div>
+    <div class="gallery"></div>
+
+    <script>
+        // 主线程逻辑
+        class ImagePreloader {
+            constructor() {
+                this.worker = new Worker('preload-worker.js');
+                this.gallery = document.querySelector('.gallery');
+                this.progressBar = document.querySelector('.progress');
+                this.initWorker();
+            }
+
+            initWorker() {
+                // 配置参数
+                const config = {
+                    imageList: this.generateImageUrls(100), // 生成100张图片URL
+                    chunkSize: 10,    // 分片大小
+                    retryCount: 3     // 重试次数
+                };
+
+                // 发送预加载任务
+                this.worker.postMessage(config);
+
+                // 接收Worker进度更新
+                this.worker.onmessage = (e) => {
+                    const { type, data } = e.data;
+                    
+                    switch(type) {
+                        case 'progress':
+                            this.updateProgress(data);
+                            break;
+                        case 'loaded':
+                            this.appendImage(data);
+                            break;
+                        case 'error':
+                            this.handleError(data);
+                            break;
+                        case 'complete':
+                            this.onComplete();
+                            break;
+                    }
+                };
+            }
+
+            generateImageUrls(count) {
+                return Array.from({length: count}, (_, i) => 
+                    `https://picsum.photos/800/600?random=${i}&cache=${Date.now()}`);
+            }
+
+            updateProgress({ loaded, total }) {
+                const percent = (loaded / total * 100).toFixed(1);
+                this.progressBar.style.width = `${percent}%`;
+            }
+
+            appendImage({ url, blob }) {
+                const img = new Image();
+                const urlCreator = window.URL || window.webkitURL;
+                const imageUrl = urlCreator.createObjectURL(blob);
+                
+                const container = document.createElement('div');
+                container.className = 'image-item';
+                
+                img.onload = () => {
+                    URL.revokeObjectURL(imageUrl);
+                    container.classList.add('loaded');
+                };
+
+                img.src = imageUrl;
+                container.appendChild(img);
+                this.gallery.appendChild(container);
+            }
+
+            handleError({ url, error }) {
+                console.error(`Failed to load ${url}:`, error);
+                // 显示错误占位图
+                const container = document.createElement('div');
+                container.className = 'image-item error';
+                container.innerHTML = '<div class="error-text">加载失败</div>';
+                this.gallery.appendChild(container);
+            }
+
+            onComplete() {
+                console.log('All images preloaded');
+                this.worker.terminate();
+                document.querySelector('.loading-bar').style.display = 'none';
+            }
+        }
+
+        // 初始化预加载
+        new ImagePreloader();
+    </script>
+</body>
+</html>

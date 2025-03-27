@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能图片加载 - 小红书风格</title>
+    <style>
+        :root {
+            --primary-color: #ff2442;
+            --light-bg: #f5f5f5;
+            --text-dark: #333;
+            --text-light: #666;
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: 'PingFang SC', 'Helvetica Neue', Arial, sans-serif;
+            color: var(--text-dark);
+            background-color: #fff;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 100%;
+            padding: 12px;
+        }
+        .feed-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(45vw, 1fr));
+            gap: 8px;
+        }
+        @media (min-width: 768px) {
+            .feed-container {
+                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+                gap: 12px;
+            }
+        }
+        .feed-item {
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            transition: transform 0.2s;
+        }
+        .feed-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        .feed-image-container {
+            width: 100%;
+            aspect-ratio: 1/1;
+            position: relative;
+            background-color: var(--light-bg);
+        }
+        .feed-image {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: none;
+        }
+        .feed-info {
+            padding: 8px;
+        }
+        .feed-title {
+            font-size: 14px;
+            margin-bottom: 4px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .feed-price {
+            color: var(--primary-color);
+            font-weight: bold;
+            font-size: 16px;
+        }
+        .loading-spinner {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 24px;
+            height: 24px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: var(--primary-color);
+            animation: spin 1s ease-in-out infinite;
+        }
+        .error-placeholder {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #f0f0f0;
+            color: var(--text-light);
+            font-size: 14px;
+        }
+        @keyframes spin {
+            to { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+        .header {
+            padding: 15px;
+            text-align: center;
+            background-color: #fff;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+            margin-bottom: 10px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .header h1 {
+            color: var(--primary-color);
+            font-size: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>小红书风格 - 智能图片加载</h1>
+    </div>
+    
+    <div class="container">
+        <div class="feed-container" id="feedContainer">
+            <!-- 动态内容将通过JavaScript加载 -->
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // 模拟API获取的图片数据
+            const mockImageData = [
+                { id: 1, url: 'https://picsum.photos/id/101/800/800', title: '春季新款连衣裙', price: '¥299' },
+                { id: 2, url: 'https://picsum.photos/id/102/800/800', title: '百搭休闲小白鞋', price: '¥199' },
+                { id: 3, url: 'https://picsum.photos/id/103/800/800', title: '复古文艺帆布包', price: '¥159' },
+                { id: 4, url: 'https://picsum.photos/id/104/800/800', title: '简约北欧风茶几', price: '¥599' },
+                { id: 5, url: 'https://picsum.photos/id/105/800/800', title: '无线蓝牙耳机', price: '¥399' },
+                { id: 6, url: 'https://picsum.photos/id/106/800/800', title: '智能手表运动版', price: '¥899' },
+                { id: 7, url: 'https://picsum.photos/id/107/800/800', title: '有机棉质四件套', price: '¥459' },
+                { id: 8, url: 'https://picsum.photos/id/108/800/800', title: '便携式咖啡机', price: '¥699' },
+                { id: 9, url: 'https://picsum.photos/id/109/800/800', title: '防水登山背包', price: '¥359' },
+                { id: 10, url: 'https://picsum.photos/id/110/800/800', title: '高清数码相机', price: '¥2599' },
+                { id: 11, url: 'https://picsum.photos/id/111/800/800', title: '天然乳胶枕', price: '¥199' },
+                { id: 12, url: 'https://picsum.photos/id/112/800/800', title: '多功能料理锅', price: '¥799' },
+                { id: 13, url: 'https://picsum.photos/id/113/800/800', title: '经典款太阳镜', price: '¥459' },
+                { id: 14, url: 'https://picsum.photos/id/114/800/800', title: '纯棉简约T恤', price: '¥129' },
+                { id: 15, url: 'https://picsum.photos/id/115/800/800', title: '智能空气净化器', price: '¥1299' }
+            ];
+
+            const feedContainer = document.getElementById('feedContainer');
+            let isLoading = false;
+            let currentPage = 1;
+            const itemsPerPage = 6;
+
+            // 初始化加载
+            loadMoreItems();
+
+            // 动态加载更多内容
+            window.addEventListener('scroll', function() {
+                if (shouldLoadMore() && !isLoading) {
+                    loadMoreItems();
+                }
+            });
+
+            // 判断是否需要加载更多
+            function shouldLoadMore() {
+                const scrollPosition = window.innerHeight + window.scrollY;
+                const pageHeight = document.body.offsetHeight;
+                return scrollPosition >= pageHeight - 500;
+            }
+
+            // 加载更多内容
+            function loadMoreItems() {
+                isLoading = true;
+                
+                // 模拟API请求延迟
+                setTimeout(() => {
+                    const startIndex = (currentPage - 1) * itemsPerPage;
+                    const endIndex = startIndex + itemsPerPage;
+                    const itemsToAdd = mockImageData.slice(startIndex, endIndex);
+                    
+                    if (itemsToAdd.length > 0) {
+                        renderItems(itemsToAdd);
+                        currentPage++;
+                        
+                        // 首次加载时预加载首屏图片
+                        if (currentPage === 2) {
+                            preloadFirstScreenImages();
+                        }
+                    }
+                    
+                    isLoading = false;
+                }, 800);
+            }
+
+            // 渲染商品项
+            function renderItems(items) {
+                items.forEach(item => {
+                    const feedItem = document.createElement('div');
+                    feedItem.className = 'feed-item';
+                    feedItem.innerHTML = `
+                        <div class="feed-image-container">
+                            <div class="loading-spinner"></div>
+                            <img class="feed-image lazy" 
+                                 data-src="${item.url}" 
+                                 alt="${item.title}"
+                                 onerror="handleImageError(this)">
+                            <div class="error-placeholder" style="display:none;">
+                                图片加载失败
+                            </div>
+                        </div>
+                        <div class="feed-info">
+                            <div class="feed-title">${item.title}</div>
+                            <div class="feed-price">${item.price}</div>
+                        </div>
+                    `;
+                    feedContainer.appendChild(feedItem);
+                });
+                
+                // 初始化懒加载
+                initLazyLoad();
+            }
+
+            // 预加载首屏图片
+            function preloadFirstScreenImages() {
+                const viewportHeight = window.innerHeight;
+                const firstScreenItems = [];
+                
+                // 收集首屏内的图片元素
+                document.querySelectorAll('.feed-item').forEach(item => {
+                    const rect = item.getBoundingClientRect();
+                    if (rect.top < viewportHeight * 1.5) { // 预加载首屏及下方一点的内容
+                        const img = item.querySelector('.feed-image');
+                        if (img) firstScreenItems.push(img);
+                    }
+                });
+                
+                // 预加载这些图片
+                firstScreenItems.forEach(img => {
+                    const src = img.getAttribute('data-src');
+                    if (src) {
+                        loadImageWithRetry(img, src, 3); // 重试3次
+                    }
+                });
+            }
+
+            // 初始化懒加载
+            function initLazyLoad() {
+                const lazyImages = document.querySelectorAll('.feed-image.lazy');
+                
+                // 使用IntersectionObserver实现懒加载
+                const lazyObserver = new IntersectionObserver((entries, observer) => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting) {
+                            const img = entry.target;
+                            const src = img.getAttribute('data-src');
+                            
+                            if (src) {
+                                loadImageWithRetry(img, src, 3); // 重试3次
+                                observer.unobserve(img);
+                            }
+                        }
+                    });
+                }, {
+                    rootMargin: '200px 0px' // 提前200px加载
+                });
+                
+                lazyImages.forEach(img => {
+                    // 如果图片已经在首屏预加载中，则不再观察
+                    if (!img.src) {
+                        lazyObserver.observe(img);
+                    }
+                });
+            }
+
+            // 带重试机制的图片加载
+            function loadImageWithRetry(imgElement, src, retryCount) {
+                const container = imgElement.parentElement;
+                const spinner = container.querySelector('.loading-spinner');
+                const errorPlaceholder = container.querySelector('.error-placeholder');
+                
+                // 显示加载状态
+                if (spinner) spinner.style.display = 'block';
+                if (errorPlaceholder) errorPlaceholder.style.display = 'none';
+                
+                let attempts = 0;
+                
+                function attemptLoad() {
+                    attempts++;
+                    console.log(`尝试加载图片: ${src}, 尝试次数: ${attempts}`);
+                    
+                    const img = new Image();
+                    img.src = src;
+                    
+                    img.onload = function() {
+                        // 加载成功
+                        imgElement.src = src;
+                        imgElement.style.display = 'block';
+                        imgElement.classList.remove('lazy');
+                        if (spinner) spinner.style.display = 'none';
+                        console.log(`图片加载成功: ${src}`);
+                    };
+                    
+                    img.onerror = function() {
+                        if (attempts < retryCount) {
+                            // 重试
+                            console.log(`图片加载失败，重试中... (${attempts}/${retryCount})`);
+                            setTimeout(attemptLoad, 1000 * attempts); // 指数退避
+                        } else {
+                            // 最终失败
+                            console.error(`图片加载失败: ${src}`);
+                            if (spinner) spinner.style.display = 'none';
+                            if (errorPlaceholder) errorPlaceholder.style.display = 'flex';
+                        }
+                    };
+                }
+                
+                attemptLoad();
+            }
+
+            // 全局错误处理函数
+            window.handleImageError = function(imgElement) {
+                const container = imgElement.parentElement;
+                const spinner = container.querySelector('.loading-spinner');
+                const errorPlaceholder = container.querySelector('.error-placeholder');
+                
+                if (spinner) spinner.style.display = 'none';
+                if (errorPlaceholder) errorPlaceholder.style.display = 'flex';
+                
+                console.error('图片加载错误:', imgElement.dataset.src);
+            };
+        });
+    </script>
+</body>
+</html>

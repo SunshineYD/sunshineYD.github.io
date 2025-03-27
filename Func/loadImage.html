@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小镇的风与她 | 摄影作品画廊</title>
+    <style>
+        :root {
+            --primary-color: #8B4513; /* 木质色调 */
+            --secondary-color: #F4EBD0; /* 泛黄纸质 */
+        }
+
+        body {
+            background: var(--secondary-color);
+            font-family: '楷体', serif;
+            margin: 0;
+        }
+
+        .gallery-title {
+            text-align: center;
+            padding: 2rem;
+            color: var(--primary-color);
+            border-bottom: 3px dashed var(--primary-color);
+            margin: 0 2rem;
+        }
+
+        .image-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1.5rem;
+            padding: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .image-item {
+            position: relative;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            overflow: hidden;
+            transform: rotate(-1deg);
+            transition: transform 0.3s ease;
+            min-height: 400px;
+        }
+
+        .image-item:hover {
+            transform: rotate(0) scale(1.03);
+            z-index: 2;
+        }
+
+        .image-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(
+                35deg,
+                rgba(139,69,19,0.1) 0%,
+                rgba(244,235,208,0.2) 100%
+            );
+            z-index: 1;
+        }
+
+        .image-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0;
+            transition: opacity 0.5s ease-in-out;
+        }
+
+        .image-item img.loaded {
+            opacity: 1;
+        }
+
+        .photo-meta {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 1rem;
+            background: linear-gradient(
+                to top,
+                rgba(0,0,0,0.7) 0%,
+                transparent 100%
+            );
+            color: white;
+            z-index: 2;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+
+        .image-item:hover .photo-meta {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <h1 class="gallery-title">小镇的风与她</h1>
+    <div class="image-container" id="imageContainer"></div>
+
+    <script>
+        class GalleryLoader {
+            constructor() {
+                this.photoData = [];
+                this.observer = null;
+                this.preloadCount = 4;
+                this.retryLimit = 3;
+                this.retryMap = new Map();
+            }
+
+            async initialize() {
+                await this.fetchPhotoData();
+                this.calculatePreloadStrategy();
+                await this.preloadEssentialPhotos();
+                this.setupLazyLoad();
+            }
+
+            async fetchPhotoData() {
+                // 使用真实可访问的测试图片服务
+                this.photoData = Array.from({length: 30}, (_, i) => ({
+                    id: `photo_${i + 1}`,
+                    url: `https://picsum.photos/800/600?random=${i + 1}`,
+                    title: ['巷口的阳光', '老茶馆午后', '石板路细雨'][i % 3],
+                    location: '江南古镇',
+                    date: `2023-${String((i % 12) + 1).padStart(2, '0')}-01`
+                }));
+            }
+
+            calculatePreloadStrategy() {
+                const viewportHeight = window.innerHeight;
+                const estimatedItemHeight = 500;
+                this.preloadCount = Math.ceil((viewportHeight * 1.5) / estimatedItemHeight);
+            }
+
+            async preloadEssentialPhotos() {
+                const criticalPhotos = this.photoData.slice(0, this.preloadCount);
+                await Promise.all(
+                    criticalPhotos.map(photo => this.createPhotoElement(photo))
+                );
+            }
+
+            createPhotoElement(photo, isPreload = true) {
+                return new Promise((resolve) => {
+                    const container = document.getElementById('imageContainer');
+                    
+                    const wrapper = document.createElement('div');
+                    wrapper.className = `image-item ${isPreload ? '' : 'lazy-placeholder'}`;
+                    wrapper.dataset.id = photo.id;
+                    
+                    wrapper.innerHTML = `
+                        <img 
+                            ${isPreload ? 'src' : 'data-src'}="${photo.url}"
+                            alt="${photo.title}"
+                            loading="${isPreload ? 'eager' : 'lazy'}"
+                        >
+                        <div class="photo-meta">
+                            <h3>${photo.title}</h3>
+                            <p>${photo.location} · ${photo.date}</p>
+                        </div>
+                    `;
+
+                    const img = wrapper.querySelector('img');
+                    
+                    if (isPreload) {
+                        img.onload = () => {
+                            img.classList.add('loaded');
+                            container.appendChild(wrapper);
+                            resolve();
+                        };
+                        img.onerror = () => this.handleLoadError(img, photo);
+                    } else {
+                        container.appendChild(wrapper);
+                        resolve();
+                    }
+                });
+            }
+
+            setupLazyLoad() {
+                const lazyPhotos = this.photoData.slice(this.preloadCount);
+                this.createLazyPlaceholders(lazyPhotos);
+
+                this.observer = new IntersectionObserver((entries) => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting) {
+                            const wrapper = entry.target;
+                            if (!wrapper || !wrapper.dataset) return;
+                            
+                            const img = wrapper.querySelector('img');
+                            if (!img) return;
+                            
+                            const photo = this.photoData.find(
+                                p => p.id === wrapper.dataset.id
+                            );
+                            
+                            if (photo && !img.src) {
+                                img.src = img.dataset.src;
+                                img.onload = () => {
+                                    img.classList.add('loaded');
+                                    wrapper.classList.remove('lazy-placeholder');
+                                };
+                                img.onerror = () => this.handleLoadError(img, photo);
+                            }
+                            this.observer.unobserve(wrapper);
+                        }
+                    });
+                }, {
+                    rootMargin: '300px 0px',
+                    threshold: 0.01
+                });
+
+                document.querySelectorAll('.lazy-placeholder').forEach(el => {
+                    this.observer.observe(el);
+                });
+            }
+
+            createLazyPlaceholders(photos) {
+                photos.forEach(photo => {
+                    this.createPhotoElement(photo, false);
+                });
+            }
+
+            handleLoadError(img, photo) {
+                const retry = this.retryMap.get(photo.id) || 0;
+                if (retry < this.retryLimit) {
+                    this.retryMap.set(photo.id, retry + 1);
+                    setTimeout(() => {
+                        img.src = `${photo.url}&retry=${retry + 1}`;
+                    }, 2000 * (retry + 1));
+                } else {
+                    // Base64备用图片
+                    img.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAwIiBoZWlnaHQ9IjYwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICAgIDxyZWN0IHdpZHRoPSI4MDAiIGhlaWdodD0iNjAwIiBmaWxsPSIjZjVmNWY1Ii8+CiAgICA8dGV4dCB4PSI1MCUiIHk9IjUwJSIgZm9udC1zaXplPSIyMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzk5OSI+CiAgICAgICAg55S15b2x5LiN6LaF6L+HIAogICAgPC90ZXh0Pgo8L3N2Zz4=';
+                    img.alt = '作品加载失败';
+                }
+            }
+        }
+
+        // 初始化画廊
+        const gallery = new GalleryLoader();
+        gallery.initialize();
+
+        // 响应式调整
+        window.addEventListener('resize', () => {
+            gallery.calculatePreloadStrategy();
+        });
+    </script>
+</body>
+</html>
